@@ -1,0 +1,315 @@
+---
+# Play 1: Подготовка SSH (добавление хостов в known_hosts)
+- name: Prepare SSH connections
+  hosts: all
+  gather_facts: false
+  tasks:
+    - name: Check if host in known_hosts
+      ansible.builtin.command: ssh-keygen -F {{ inventory_hostname }}
+      register: check_host
+      failed_when: false
+      changed_when: false
+      delegate_to: localhost
+
+    - name: Disable host key checking for first connection
+      ansible.builtin.set_fact:
+        ansible_ssh_common_args: "-o StrictHostKeyChecking=no"
+      when: check_host.rc == 1
+
+    - name: Gather facts to add host to known_hosts
+      ansible.builtin.setup:
+      when: check_host.rc == 1
+
+# Play 2: Установка ClickHouse (ручной способ)
+- name: Install ClickHouse
+  hosts: clickhouse
+  become: true
+  vars_files:
+    - group_vars/clickhouse.yml
+  vars:
+    clickhouse_version: "22.3.3.44"
+
+  tasks:
+    # 1. Добавляем репозиторий
+    - name: Add ClickHouse repository
+      ansible.builtin.yum_repository:
+        name: clickhouse
+        description: ClickHouse official repository
+        baseurl: https://packages.clickhouse.com/rpm/stable
+        gpgcheck: 1
+        gpgkey: https://packages.clickhouse.com/rpm/repodata/repomd.xml.key
+        enabled: 1
+
+    # 2. Устанавливаем пакеты
+    - name: Install ClickHouse packages
+      ansible.builtin.yum:
+        name:
+          - clickhouse-server-{{ clickhouse_version }}
+          - clickhouse-client-{{ clickhouse_version }}
+          - clickhouse-common-static-{{ clickhouse_version }}
+        state: present
+        disable_gpg_check: true
+
+    # 3. Создаем директорию для дополнительных конфигов
+    - name: Create config.d directory
+      ansible.builtin.file:
+        path: /etc/clickhouse-server/config.d
+        state: directory
+        mode: '0755'
+
+    # 4. КОНФИГУРАЦИЯ: только IPv4, без IPv6
+    - name: Configure listen address (IPv4 only)
+      ansible.builtin.copy:
+        dest: /etc/clickhouse-server/config.d/listen.xml
+        content: |
+          <clickhouse>
+              <!-- Слушаем только на IPv4 -->
+              <listen_host>0.0.0.0</listen_host>
+              <!-- IPv6 отключен чтобы избежать конфликта портов -->
+          </clickhouse>
+        mode: '0644'
+      notify: restart clickhouse
+
+    # 5. Отключаем SSL чтобы не было ошибок с сертификатами
+    - name: Disable SSL
+      ansible.builtin.copy:
+        dest: /etc/clickhouse-server/config.d/disable_ssl.xml
+        content: |
+          <clickhouse>
+              <openSSL>
+                  <server>
+                      <disable>true</disable>
+                  </server>
+                  <client>
+                      <disable>true</disable>
+                  </client>
+              </openSSL>
+          </clickhouse>
+        mode: '0644'
+      notify: restart clickhouse
+    
+    # 6. Даем права на создание пользователей.
+    - name: Enable SQL management for default user
+      ansible.builtin.lineinfile:
+        path: /etc/clickhouse-server/users.xml
+        regexp: '.*<access_management.*'
+        insertafter: '<default>'
+        line: '        <access_management>1</access_management>'
+      notify: restart clickhouse
+
+    # 7. Запускаем сервис
+    - name: Start ClickHouse service
+      ansible.builtin.systemd:
+        name: clickhouse-server
+        enabled: true
+        state: started
+        daemon_reload: true
+
+    # 8. Ждем пока порт 9000 откроется
+    - name: Wait for ClickHouse port 9000
+      ansible.builtin.wait_for:
+        port: 9000
+        host: 127.0.0.1
+        delay: 5
+        timeout: 30
+
+    # 9. Создаем базу данных
+    - name: Create logs database
+      ansible.builtin.command:
+        cmd: clickhouse-client --host 127.0.0.1 --port 9000 -q "CREATE DATABASE IF NOT EXISTS logs"
+      register: create_db
+      failed_when: create_db.rc != 0 and create_db.rc != 57
+      changed_when: create_db.rc == 0
+
+    # 10. Создаем пользователя logger
+    - name: Create logger user
+      ansible.builtin.command:
+        cmd: >
+          clickhouse-client --host 127.0.0.1 --port 9000 -q
+          "CREATE USER IF NOT EXISTS '{{ clickhouse_user }}' IDENTIFIED BY '{{ clickhouse_password }}'"
+      register: create_user
+      failed_when: create_user.rc != 0 and create_user.rc != 234
+      changed_when: create_user.rc == 0
+
+    # 11. Даем права
+    - name: Grant permissions to logger
+      ansible.builtin.command:
+        cmd: >
+          clickhouse-client --host 127.0.0.1 --port 9000 -q
+          "GRANT ALL ON logs.* TO '{{ clickhouse_user }}'"
+      changed_when: false
+    
+    # 12. Создаем таблицу для логов 
+    - name: Create file_log table
+      ansible.builtin.command:
+        cmd: >
+          clickhouse-client --host 127.0.0.1 --user {{ clickhouse_user }} --password {{ clickhouse_password }} -q
+          "CREATE TABLE IF NOT EXISTS logs.file_log (
+            file String,
+            host String,
+            message String,
+            timestamp DateTime64
+          ) ENGINE = Log()"
+      register: create_table
+      failed_when: create_table.rc != 0 and create_table.rc != 57
+      changed_when: create_table.rc == 0
+
+    # 13. Проверка
+    - name: Verify setup
+      ansible.builtin.command:
+        cmd: clickhouse-client --host 127.0.0.1 --port 9000 -q "SHOW DATABASES"
+      register: verify
+
+    - name: Show result
+      ansible.builtin.debug:
+        msg: "✅ ClickHouse готов. Базы данных: {{ verify.stdout_lines }}"
+
+  handlers:
+    - name: restart clickhouse
+      ansible.builtin.systemd:
+        name: clickhouse-server
+        state: restarted
+
+# Play 3: Установка Vector
+- name: Install and configure Vector
+  hosts: vector
+  become: true
+  vars_files:
+    - group_vars/vector.yml
+  pre_tasks:
+    - name: Create logs directory
+      ansible.builtin.file:
+        path: "/home/rocky/logs"
+        state: directory
+        mode: '0755'
+        owner: rocky
+        group: rocky
+
+  tasks:
+    - name: Download Vector RPM
+      ansible.builtin.get_url:
+        url: "https://packages.timber.io/vector/{{ vector_version }}/vector-{{ vector_version }}-1.x86_64.rpm"
+        dest: "/tmp/vector.rpm"
+        mode: '0644'
+
+    - name: Install Vector
+      ansible.builtin.yum:
+        name: /tmp/vector.rpm
+        state: present
+        disable_gpg_check: true
+
+    - name: Create Vector configuration directory
+      ansible.builtin.file:
+        path: "{{ vector_config_dir }}"
+        state: directory
+        mode: '0755'
+
+    - name: Deploy Vector configuration
+      ansible.builtin.template:
+        src: vector.toml.j2
+        dest: "{{ vector_config_dir }}/vector.toml"
+        mode: '0644'
+      notify: restart vector
+
+    - name: Enable and start Vector
+      ansible.builtin.systemd:
+        name: vector
+        enabled: true
+        state: started
+
+  handlers:
+    - name: restart vector
+      ansible.builtin.systemd:
+        name: vector
+        state: restarted
+
+# Play 4: Установка Lighthouse и Nginx
+- name: Install and configure Lighthouse
+  hosts: lighthouse
+  become: true
+  vars_files:
+    - group_vars/lighthouse.yml
+  tasks:
+    - name: Install EPEL and Nginx
+      ansible.builtin.yum:
+        name:
+          - epel-release
+          - nginx
+          - git
+        state: present
+
+    - name: Remove existing Lighthouse directory
+      ansible.builtin.file:
+        path: "{{ lighthouse_path }}"
+        state: absent
+
+    - name: Clone Lighthouse repository
+      ansible.builtin.git:
+        repo: "{{ lighthouse_repo }}"
+        dest: "{{ lighthouse_path }}"
+        version: "{{ lighthouse_version }}"
+        force: true
+
+    - name: Set permissions
+      ansible.builtin.file:
+        path: "{{ lighthouse_path }}"
+        owner: nginx
+        group: nginx
+        recurse: true
+
+    - name: Deploy Nginx configuration
+      ansible.builtin.template:
+        src: nginx.conf.j2
+        dest: /etc/nginx/nginx.conf
+        mode: '0644'
+      notify: restart nginx
+
+    - name: Enable and start Nginx
+      ansible.builtin.systemd:
+        name: nginx
+        enabled: true
+        state: started
+
+    - name: Configure firewall
+      ansible.builtin.firewalld:
+        service: http
+        permanent: true
+        state: enabled
+        immediate: true
+      ignore_errors: true
+
+  handlers:
+    - name: restart nginx
+      ansible.builtin.systemd:
+        name: nginx
+        state: restarted
+
+# Play 5: Итоговая информация
+- name: Display service endpoints
+  hosts: localhost
+  gather_facts: false
+  tasks:
+    - name: Get ClickHouse IP
+      ansible.builtin.set_fact:
+        ch_ip: "{{ hostvars['clickhouse-1'].ansible_host | default('') }}"
+      when: "'clickhouse-1' in hostvars"
+
+    - name: Get Vector IP
+      ansible.builtin.set_fact:
+        vec_ip: "{{ hostvars['vector-1'].ansible_host | default('') }}"
+      when: "'vector-1' in hostvars"
+
+    - name: Get Lighthouse IP
+      ansible.builtin.set_fact:
+        lh_ip: "{{ hostvars['lighthouse-1'].ansible_host | default('') }}"
+      when: "'lighthouse-1' in hostvars"
+
+    - name: Show endpoints
+      ansible.builtin.debug:
+        msg:
+          - "✅ Развертывание завершено!"
+          - "📊 ClickHouse: http://{{ ch_ip }}:8123 (user: {{ hostvars['clickhouse-1'].clickhouse_user | default('logger') }}, password: {{ hostvars['clickhouse-1'].clickhouse_password | default('logger') }})"
+          - "📈 Vector: http://{{ vec_ip }}:8686"
+          - "🌐 Lighthouse: http://{{ lh_ip }}"
+          - ""
+          - "📝 Тестовые данные: положите JSON-логи в /home/rocky/logs/ на vector-1"

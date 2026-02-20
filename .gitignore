@@ -1,0 +1,68 @@
+# Ignore sensitive and environment files
+
+# Terraform
+*.tfstate
+*.tfstate.*
+terraform.tfvars
+*.tfvars
+.terraform/
+.terraform.lock.hcl
+crash.log
+override.tf
+override.tf.json
+*_override.tf
+*_override.tf.json
+
+# Ansible sensitive files
+/ansible/.vault_pass.txt
+/ansible/vault_password_file
+/ansible/*.vault
+/ansible/.vault
+inventory/prod.ini
+inventory/*.pem
+inventory/*.key
+inventory/*.crt
+
+# SSH keys and certificates
+*.pem
+*.key
+id_rsa
+id_dsa
+id_ecdsa
+id_ed25519
+*.ppk
+
+# Environment and secrets
+.env
+.env.*
+secrets.yml
+secrets.yaml
+*.secret
+*.creds
+*.credentials
+*.vault
+
+# Operating system files
+.DS_Store
+Thumbs.db
+*~
+*.swp
+*.swo
+
+# IDE / editor
+.vscode/
+.idea/
+*.iml
+
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+venv/
+ENV/
+
+# Node
+node_modules/
+
+# Logs
+*.log

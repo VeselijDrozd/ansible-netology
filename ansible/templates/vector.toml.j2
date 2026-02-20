@@ -1,0 +1,25 @@
+[api]
+enabled = true
+address = "127.0.0.1:8686"
+
+[sources.logs]
+type = "file"
+include = ["/home/rocky/logs/*.log"]
+read_from = "beginning"
+
+[transforms.parser]
+type = "remap"
+inputs = ["logs"]
+source = '''
+. = parse_json(.message) ?? .
+.timestamp = now()
+'''
+
+[sinks.clickhouse]
+type = "clickhouse"
+inputs = ["parser"]
+endpoint = "http://{{ clickhouse_host }}:8123"
+database = "logs"
+table = "file_log"
+compression = "gzip"
+healthcheck = true

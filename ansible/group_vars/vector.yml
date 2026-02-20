@@ -1,0 +1,11 @@
+---
+vector_version: "0.21.0"
+vector_config_dir: "/etc/vector"
+vector_data_dir: "/var/lib/vector"
+
+# Будет заполнено динамически через шаблон
+vector_config_template: "vector.toml.j2"
+
+clickhouse_host: "{{ hostvars['clickhouse-1'].ansible_default_ipv4.address }}"
+clickhouse_user: "logger"
+clickhouse_password: "logger"

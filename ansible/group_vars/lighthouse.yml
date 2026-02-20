@@ -1,0 +1,9 @@
+---
+lighthouse_repo: "https://github.com/VKCOM/lighthouse.git"
+lighthouse_version: "master"
+lighthouse_path: "/usr/share/nginx/lighthouse"
+
+nginx_user: "nginx"
+clickhouse_host: "{{ hostvars['clickhouse-1'].ansible_default_ipv4.address }}"
+clickhouse_user: "logger"
+clickhouse_password: "logger"
