@@ -83,8 +83,6 @@ ansible-vault edit ansible/group_vars/clickhouse.yml --ask-vault-pass
 Если хотите, могу: сгенерировать `roles/` в более полном виде, выполнить `ansible-playbook --syntax-check` или подготовить `Makefile`/скрипты для удобного запуска.
 
 ./generate_inventory.sh
-# или, при необходимости, выполняйте из каталога проекта
-# bash generate_inventory.sh
 
 Установите роли Ansible (при необходимости):
 
