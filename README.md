@@ -85,15 +85,14 @@ ansible-vault edit ansible/group_vars/clickhouse.yml --ask-vault-pass
 ./generate_inventory.sh
 # или, при необходимости, выполняйте из каталога проекта
 # bash generate_inventory.sh
-```
 
-4) Установите роли Ansible (при необходимости):
+Установите роли Ansible (при необходимости):
 
 ```bash
 ansible-galaxy install -r ansible/requirements.yml -p ./ansible/roles
 ```
 
-5) Запустите плейбук Ansible:
+Запустите плейбук Ansible:
 
 ```bash
 cd ansible
