@@ -1,43 +1,37 @@
 # ansible-netology
 
-Репозиторий для развёртывания инфраструктуры и приложений с помощью Terraform и Ansible.
+Инфраструктурный репозиторий для развёртывания сервиса сбора и хранения логов в облаке с помощью
+Terraform (создание инфраструктуры) и Ansible (конфигурация сервисов).
 
-## Краткое описание
+Коротко: Terraform создаёт машины/сети, `generate_inventory.sh` формирует инвентарь, затем Ansible `site.yml` применяет роли к хостам.
 
-Проект содержит Terraform-конфигурацию для создания инфраструктуры и Ansible-плейбуки для конфигурации сервисов (ClickHouse, Lighthouse, Vector и др.). Есть скрипт для генерации инвентаря Ansible.
+**Ключевые компоненты**
 
-## Структура репозитория
+- `terraform/` — конфигурация инфраструктуры (создание VMs, сети, security groups).
+- `ansible/` — плейбуки, `group_vars/`, локальные `roles/` и шаблоны для развёртывания сервисов:
+  - ClickHouse — аналитическая БД
+  - Vector — агент сбора логов
+  - Lighthouse + nginx — веб-интерфейс/публичная часть
+- `generate_inventory.sh` — скрипт для генерации инвентаря Ansible (если применяется)
 
-- [generate_inventory.sh](generate_inventory.sh) — скрипт генерации инвентаря.
-- [ansible/](ansible/) — директория с Ansible-кодом:
-  - [ansible/site.yml](ansible/site.yml) — основной плейбук.
-  - [ansible/requirements.yml](ansible/requirements.yml) — список ролей для `ansible-galaxy`.
-  - [ansible/group_vars/](ansible/group_vars/) — переменные групп:
-    - [ansible/group_vars/clickhouse.yml](ansible/group_vars/clickhouse.yml)
-    - [ansible/group_vars/lighthouse.yml](ansible/group_vars/lighthouse.yml)
-    - [ansible/group_vars/vector.yml](ansible/group_vars/vector.yml)
-  - [ansible/inventory/](ansible/inventory/) — пример/шаблоны инвентаря:
-    - [ansible/inventory/prod.ini](ansible/inventory/prod.ini)
-    - [ansible/inventory/template.yml](ansible/inventory/template.yml)
-    - [ansible/inventory/templates/nginx.conf.j2](ansible/inventory/templates/nginx.conf.j2)
-    - [ansible/inventory/templates/vector.toml.j2](ansible/inventory/templates/vector.toml.j2)
-- [terraform/](terraform/) — Terraform-конфигурация:
-  - [terraform/main.tf](terraform/main.tf)
-  - [terraform/variables.tf](terraform/variables.tf)
-  - [terraform/terraform.tfvars](terraform/terraform.tfvars)
-  - [terraform/provider.tf](terraform/provider.tf)
+**Структура (кратко)**
+
+- `terraform/` — main.tf, variables.tf, provider.tf и т.д.
+- `ansible/site.yml` — основной плейбук (теперь использует локальные роли: `ssh_prep`, `clickhouse`, `vector`, `lighthouse`).
+- `ansible/roles/` — локальные роли реализующие логику установки сервисов.
+- `ansible/group_vars/` — переменные для групп хостов.
+- `ansible/inventory/` — примеры инвентаря и шаблоны.
 
 ## Быстрый старт
 
-1) Установите зависимости:
+1. Установите требования (Terraform, Ansible):
 
 ```bash
-# Terraform и Ansible должны быть установлены в системе
 ansible --version
 terraform --version
 ```
 
-2) Подготовьте Terraform и создайте инфраструктуру:
+2. Подготовьте инфраструктуру (пример):
 
 ```bash
 cd terraform
@@ -46,9 +40,48 @@ terraform plan -out plan.tfplan
 terraform apply "plan.tfplan"
 ```
 
-3) Сгенерируйте инвентарь (если используется скрипт):
+3. (Опционально) Сгенерируйте инвентарь:
 
 ```bash
+./generate_inventory.sh
+```
+
+4. Запустите Ansible-плейбук:
+
+```bash
+cd ansible
+ansible-playbook -i inventory/prod.ini site.yml -u <ssh_user> --ask-become-pass
+```
+
+5. Полезные проверки:
+
+```bash
+# Проверка синтаксиса
+ansible-playbook --syntax-check -i inventory/prod.ini site.yml
+
+# Прогон в режиме dry-run
+ansible-playbook -i inventory/prod.ini site.yml --check --diff
+```
+
+## Vault и безопасность
+
+- Если в `group_vars/` есть чувствительные данные, используйте `ansible-vault`.
+- Пример редактирования зашифрованного файла:
+
+```bash
+ansible-vault edit ansible/group_vars/clickhouse.yml --ask-vault-pass
+```
+
+Не храните пароль от Vault в репозитории.
+
+## Примечания и рекомендации
+
+- README в `ansible/` обновлён и отражает текущую организацию ролей.
+- Некоторые переменные в `group_vars/clickhouse.yml` являются избыточными для упрощённой роли — можно привести к необходимому минимуму.
+- Рекомендуется протестировать `site.yml` с `--limit` и `--check` перед применением в продакшн.
+
+Если хотите, могу: сгенерировать `roles/` в более полном виде, выполнить `ansible-playbook --syntax-check` или подготовить `Makefile`/скрипты для удобного запуска.
+
 ./generate_inventory.sh
 # или, при необходимости, выполняйте из каталога проекта
 # bash generate_inventory.sh

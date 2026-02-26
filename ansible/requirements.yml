@@ -2,25 +2,22 @@
 # Роли будем устанавливать из GitHub
 roles:
   # ClickHouse role
-  - name: clickhouse
-    src: https://github.com/AlexeySetevoi/ansible-clickhouse.git
+  - name: clickhouse-role
+    src: https://github.com/VeselijDrozd/ansible-role-clickhouse.git
     scm: git
-    version: master
-    path: roles
+    version: v1.0.1
 
   # Vector role 
-  - name: vector
-    src: https://github.com/ArtemShtepa/vector-role.git
+  - name: vector-role
+    src: https://github.com/VeselijDrozd/ansible-role-vector.git
     scm: git
-    version: main
-    path: roles
+    version: v1.0.1
 
   # Lighthouse role
-  - name: lighthouse
-    src: https://github.com/ArtemShtepa/lighthouse-role.git
+  - name: lighthouse-role
+    src: https://github.com/VeselijDrozd/ansible-role-lighthouse.git
     scm: git
-    version: main
-    path: roles
+    version: v1.0.1
 
 collections:
   - name: community.general
